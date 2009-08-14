@@ -1,7 +1,5 @@
 [comment]Copied from the build_related.html page[/comment]
 
-[flag type=write table=merchandising]
-
 [calc]
 	%sku = (
 		[loop search="
@@ -70,9 +68,10 @@ EOF
 	my $out = '';
 	for(sort keys %sku) {
 		my $val = $Tag->uneval( { ref => $sku{$_} } );
-		$out .= "$_: times ordered=$times_ordered{$_} others_bought ==> $val\n";
+#		$out .= "$_: times ordered=$times_ordered{$_} others_bought ==> $val\n";
 		$mdb->set_field($_, 'others_bought', $val );
 		$mdb->set_field($_, 'times_ordered', $times_ordered{$_} );
 	}
+	$out .= "\nbuild related job finished.\n";
 	return $out;
 [/perl]
