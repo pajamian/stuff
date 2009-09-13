@@ -1,3 +1,4 @@
+# Copyright 2002-2007 Interchange Development Group and others
 # Copyright 2009 Peter Ajamian <peter@pajamian.dhs.org>
 # 
 # This program is free software; you can redistribute it and/or modify
@@ -18,11 +19,10 @@
 # count it as a true value.
 
 UserTag both              hasEndTag
-UserTag both              PosNumber    0
 UserTag both              NoReparse    1
 UserTag both              Routine      <<EOR
 sub {
-	my @ary = split /\[and\]/, shift;
+	my @ary = split /\[and\]/i, shift, -1;
 
 	foreach (@ary) {
 		$_ = interpolate_html($_);
