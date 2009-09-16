@@ -1,10 +1,17 @@
+# Copyright 2009 Peter Ajamian <peter@pajamian.dhs.org>
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+
 # A usertag to restrict the tags allowed in the body text.  Converts the opening [ in any other tag
 # to &#91;.
 # tags          = space separated list of tags to allow.  Regexps ok, - or _ will be converted to [-_].
 # unsafe=1      = convert &#91; to [ in the body text before processing.
 # interpolate=1 = interpolate the body first.  This is good if you have to read data from the output
 #                 of another tag and then parse that output for other specific tags.  Be certain that
-#                 those tags do reparse thier output or it defeats the purpose.
+#                 those tags do not reparse thier output or it defeats the purpose.
 # reparse=0     = don't do this or none of the tags will be parsed, not even the ones you want!
 
 UserTag restrict-tags Description	Parse only the allowed tags in the body.
