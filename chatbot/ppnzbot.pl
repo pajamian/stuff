@@ -171,19 +171,22 @@ $con->reg_cb(privatemsg => sub {
 
 # Process the ping replies
 # Doesn't quite work yet, needs some debugging.
-#$con->reg_cb(ctcp => sub {
-#    my ($self, $src, $target, $tag, $msg, $type) = @_;
-#    return unless $type eq 'NOTICE';
+$con->reg_cb(ctcp_ping => sub {
+    my ($self, $src, $target, $msg, $type) = @_;
+    return unless $type eq 'NOTICE';
 
-#    my $elapsed = Time::HiRes::time() - $msg;
+    my $elapsed = Time::HiRes::time() - $msg;
 
-#    print "CTCP src=$src tag=$tag type=$type msg=$msg";
-#    $msg = sprintf('Ping time %01.2f seconds', $elapsed);
-#    $self->send_srv(PRIVMSG => 
-#});
+    $msg = sprintf('Ping time %01.2f seconds', $elapsed);
+#    print Dumper($src, $target, $msg, $type, $elapsed);
+    $self->send_srv(NOTICE => $src, $msg);
+});
 
 # Debugging
-#$con->reg_cb(debug_recieve
+#$con->reg_cb(debug_recv => sub {
+#    my ($self, $ircmsg) = @_;
+#    print Dumper($ircmsg);
+#});
 
 # Join channels:
 $con->send_srv(JOIN => join ',', @channels);
