@@ -22,9 +22,9 @@
 use strict;
 use warnings;
 
+use Encode;
 use Data::Dumper;
 use Time::HiRes ();
-
 use AnyEvent;
 use AnyEvent::IRC::Client;
 use AnyEvent::Feed;
@@ -46,7 +46,7 @@ my @channels = qw{
 };
 use warnings qw{qw};
 
-my $ping = sub {
+sub ping {
     my ($self, undef, $nick) = @_;
     my $time = Time::HiRes::time();
     $self->send_srv(PRIVMSG => $nick, "\001PING $time\001");
@@ -59,7 +59,7 @@ my $public_commands = {
 	my ($self, $chan, $nick) = @_;
 	$self->send_chan($chan, PRIVMSG => $chan, "$nick: It works!");
     },
-    '!ping' => $ping,
+    '!ping' => \&ping,
 };
 
 # Private message command list ... same as above.
@@ -68,20 +68,87 @@ my $private_commands = {
 	my ($self, undef, $nick) = @_;
 	$self->send_srv(NOTICE => $nick, "It works!");
     },
-    '!ping' => $ping,
+    '!ping' => \&ping,
 };
 
 my %feeds = qw{
 	http://twitter.com/statuses/user_timeline/88316972.rss			Twitter
-	http://www.facebook.com/feeds/page.php?format=atom10&id=305641940721	Facebook
+	http://www.facebook.com/feeds/page.php?format=rss20&id=305641940721	Facebook
 };
 
 foreach my $feed (values %feeds) {
     $feed = [$feed, 0];
 }
 
-my $timer;
-my $con = new AnyEvent::IRC::Client;
+my %feedcmds = map { (lc $_->[0], [$_->[0], undef]) } values %feeds;
+
+sub feed_on_request {
+    my ($self, undef, $nick, $cmd) = @_;
+    $cmd =~ s/^!//;
+
+    my ($title, $feed) = @{$feedcmds{$cmd}};
+
+    if (!defined $feed) {
+	$self->send_srv(NOTICE => $nick, "Feed for $title not loaded yet.  Please try again later.");
+	return;
+    }
+
+#    print Dumper($feed);
+
+    foreach my $entry (@{$feed->{rss}{items}}) {
+	my $link = $entry->{link};
+	my $etitle = $entry->{title};
+	my $date = $entry->{pubDate};
+
+	my $msg = encode('utf8', "$date: [$title] $etitle @ $link");
+	$self->send_srv(PRIVMSG => $nick, $msg);
+    }
+}
+
+foreach (keys %feedcmds) {
+    $public_commands->{"!$_"} = \&feed_on_request;
+    $private_commands->{"!$_"} = \&feed_on_request;
+}
+
+# Overload the send_msg function to make it pad the messages so that we don't flood the server.
+{
+    package AnyEvent::IRC::Client;
+    no warnings qw{redefine};
+
+    my @msg_queue;
+    my $old_send_msg = \&send_msg;
+    my $timer;
+    my $timer_cb = sub {
+	if (!@msg_queue) {
+	    undef $timer;
+	    return;
+	}
+	else {
+	    my $args = shift @msg_queue;
+	    $old_send_msg->(@$args);
+	    return;
+	}
+    };
+
+    *send_msg = sub {
+	# Check the message queue and send the message if it's empty, otherwise queue it.
+	if (!$timer) {
+	    $old_send_msg->(@_);
+	    $timer = AnyEvent->timer(
+				     after => 1,
+				     interval => 1,
+				     cb => $timer_cb,
+				     );
+	    return;
+	}
+	else {
+	    push @msg_queue, [@_];
+	    return;
+	}
+    };
+}
+
+my $con = AnyEvent::IRC::Client->new(send_initial_whois => 1);
 
 sub read_feed {
     my ($feed_reader, $new_entries, $feed, $error) = @_;
@@ -91,17 +158,18 @@ sub read_feed {
 	return;
     }
 
+    my $title = $feeds{$feed_reader->url()}[0];
+
+    # Load the feed up for manual command-based retrieval
+    $feedcmds{lc $title}[1] = $feed;
+
     # Skip the first reading so we don't display a bunch of old records.
     if (!$feeds{$feed_reader->url()}[1]) {
 	$feeds{$feed_reader->url()}[1] = 1;
 	return;
     }
 
-#    my $title = $feed->{rss}{channel}{title};
-#    $title =~ s:\s*/\s*.*::;
-    my $title = $feeds{$feed_reader->url()}[0];
-
-    for (@$new_entries) {
+    foreach (@$new_entries) {
 	my ($hash, $entry) = @$_;
 	# $hash a unique hash describing the $entry
 	# $entry is the XML::Feed::Entry object of the new entries
@@ -110,7 +178,7 @@ sub read_feed {
 	my $link = $entry->{entry}{link};
 	my $etitle = $entry->{entry}{title};
 
-	my $msg = "[$title] $etitle @ $link";
+	my $msg = encode('utf8', "[$title] $etitle @ $link");
 	
 	foreach my $chan (@channels) {
 	    $con->send_chan($chan, PRIVMSG => $chan, $msg);
@@ -153,7 +221,7 @@ $con->reg_cb(publicmsg => sub {
 
     return unless $public_commands->{$cmd};
 
-    $public_commands->{$cmd}($self, $chan, $nick, $msg, $ircmsg);
+    $public_commands->{$cmd}($self, $chan, $nick, $cmd, $msg, $ircmsg);
 });
 
 # Register a callback for private messages
@@ -166,7 +234,7 @@ $con->reg_cb(privatemsg => sub {
 
     return unless $private_commands->{$cmd};
 
-    $private_commands->{$cmd}($self, $tonick, $nick, $msg, $ircmsg);
+    $private_commands->{$cmd}($self, $tonick, $nick, $cmd, $msg, $ircmsg);
 });
 
 # Process the ping replies
