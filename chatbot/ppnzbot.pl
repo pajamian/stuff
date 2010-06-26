@@ -22,29 +22,34 @@
 use strict;
 use warnings;
 
+use FindBin;
+unshift @INC, $FindBin::Bin;
+use ChatBotSettings;
+
 use Encode;
 use Data::Dumper;
 use Time::HiRes ();
+use Date::Parse;
+use POSIX qw{strftime tzset};
 use AnyEvent;
 use AnyEvent::IRC::Client;
 use AnyEvent::Feed;
 
+# Set the time zone
+$ENV{TZ} = 'Pacific/Auckland';
+tzset();
+
 my $c = AnyEvent->condvar;
 
-my $host = 'irc.piratpartiet.se';
-my $port = 6667;
+my $host = $ChatBotSettings::Host;
+my $port = $ChatBotSettings::Port;
 my $info = {
-    nick => 'kiwi',
-    user => 'kiwi',
-    real => 'PPNZ bot',
+    nick => $ChatBotSettings::Nick,
+    user => $ChatBotSettings::Ident,
+    real => $ChatBotSettings::RealName,
 };
 
-no warnings qw{qw};
-my @channels = qw{
-    #ppnz
-    #ppnzsocial
-};
-use warnings qw{qw};
+my @channels = @ChatBotSettings::Channels;
 
 sub ping {
     my ($self, undef, $nick) = @_;
@@ -71,10 +76,7 @@ my $private_commands = {
     '!ping' => \&ping,
 };
 
-my %feeds = qw{
-	http://twitter.com/statuses/user_timeline/88316972.rss			Twitter
-	http://www.facebook.com/feeds/page.php?format=rss20&id=305641940721	Facebook
-};
+my %feeds = %ChatBotSettings::Feeds;
 
 foreach my $feed (values %feeds) {
     $feed = [$feed, 0];
@@ -83,7 +85,7 @@ foreach my $feed (values %feeds) {
 my %feedcmds = map { (lc $_->[0], [$_->[0], undef]) } values %feeds;
 
 sub feed_on_request {
-    my ($self, undef, $nick, $cmd) = @_;
+    my ($self, undef, $nick, $cmd, $msg) = @_;
     $cmd =~ s/^!//;
 
     my ($title, $feed) = @{$feedcmds{$cmd}};
@@ -93,13 +95,22 @@ sub feed_on_request {
 	return;
     }
 
+    # Find the number of entries to display and grab a slice of the entries array.
+    my $numentries = (split /\s+/, $msg, 3)[1] || '';
+    $numentries =~ s/\D//g;
+    $numentries ||= 3;
+    my @entries = @{$feed->{rss}{items}};
+    $numentries = scalar @entries if $numentries > scalar @entries;
+    @entries = reverse @entries[0..$numentries-1];
+
 #    print Dumper($feed);
 
-    foreach my $entry (@{$feed->{rss}{items}}) {
+    foreach my $entry (@entries) {
 	my $link = $entry->{link};
 	my $etitle = $entry->{title};
 	my $date = $entry->{pubDate};
-
+	$date = str2time $date;
+	$date = strftime('%d %b %I:%M%P', localtime($date));
 	my $msg = encode('utf8', "$date: [$title] $etitle @ $link");
 	$self->send_srv(PRIVMSG => $nick, $msg);
     }
@@ -161,7 +172,9 @@ sub read_feed {
     my $title = $feeds{$feed_reader->url()}[0];
 
     # Load the feed up for manual command-based retrieval
-    $feedcmds{lc $title}[1] = $feed;
+    $feedcmds{lc $title}[1] = $feed if $feed;
+
+#    print Dumper($feed);
 
     # Skip the first reading so we don't display a bunch of old records.
     if (!$feeds{$feed_reader->url()}[1]) {
@@ -188,10 +201,10 @@ sub read_feed {
     }
 }
 
-foreach my $url (keys %feeds) {
-    AnyEvent::Feed->new (
+while (my ($url, $vals) = each %feeds) {
+    $vals->[2] = AnyEvent::Feed->new (
 			 url      => $url,
-			 interval => 30,
+			 interval => 300,
 			 on_fetch => \&read_feed,
 			 );
   }
@@ -255,6 +268,9 @@ $con->reg_cb(ctcp_ping => sub {
 #    my ($self, $ircmsg) = @_;
 #    print Dumper($ircmsg);
 #});
+
+# Identify to NickServ:
+$con->send_srv(PRIVMSG => 'NickServ', "IDENTIFY $ChatBotSettings::NSpass");
 
 # Join channels:
 $con->send_srv(JOIN => join ',', @channels);
