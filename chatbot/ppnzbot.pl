@@ -108,6 +108,7 @@ sub feed_on_request {
     foreach my $entry (@entries) {
 	my $link = $entry->{link};
 	my $etitle = $entry->{title};
+	$etitle =~ s/\s+/ /g;
 	my $date = $entry->{pubDate};
 	$date = str2time $date;
 	$date = strftime('%d %b %I:%M%P', localtime($date));
@@ -190,9 +191,10 @@ sub read_feed {
 
 	my $link = $entry->{entry}{link};
 	my $etitle = $entry->{entry}{title};
+	$etitle =~ s/\s+/ /g;
 
 	my $msg = encode('utf8', "[$title] $etitle @ $link");
-	
+
 	foreach my $chan (@channels) {
 	    $con->send_chan($chan, PRIVMSG => $chan, $msg);
 	}
