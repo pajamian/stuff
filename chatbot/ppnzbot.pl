@@ -54,7 +54,7 @@ my @channels = @ChatBotSettings::Channels;
 sub ping {
     my ($self, undef, $nick) = @_;
     my $time = Time::HiRes::time();
-    $self->send_srv(PRIVMSG => $nick, "\001PING $time\001");
+    $self->send_srv(PRIVMSG => $nick, "\001PING $time\001", {priority => 'high'});
 };
 
 # Public chat command list.  This is a hash that includes the lowecase command name (to match the first word of the msg)
@@ -62,7 +62,7 @@ sub ping {
 my $public_commands = {
     '!test' => sub {
 	my ($self, $chan, $nick) = @_;
-	$self->send_chan($chan, PRIVMSG => $chan, "$nick: It works!");
+	$self->send_chan($chan, PRIVMSG => $chan, "$nick: It works!", {priority => 'normal'});
     },
     '!ping' => \&ping,
 };
@@ -71,7 +71,7 @@ my $public_commands = {
 my $private_commands = {
     '!test' => sub {
 	my ($self, undef, $nick) = @_;
-	$self->send_srv(NOTICE => $nick, "It works!");
+	$self->send_srv(NOTICE => $nick, "It works!", {priority => 'normal'});
     },
     '!ping' => \&ping,
 };
@@ -91,7 +91,7 @@ sub feed_on_request {
     my ($title, $feed) = @{$feedcmds{$cmd}};
 
     if (!defined $feed) {
-	$self->send_srv(NOTICE => $nick, "Feed for $title not loaded yet.  Please try again later.");
+	$self->send_srv(NOTICE => $nick, "Feed for $title not loaded yet.  Please try again later.", {priority => 'normal'});
 	return;
     }
 
@@ -113,7 +113,7 @@ sub feed_on_request {
 	$date = str2time $date;
 	$date = strftime('%d %b %I:%M%P', localtime($date));
 	my $msg = encode('utf8', "$date: [$title] $etitle @ $link");
-	$self->send_srv(PRIVMSG => $nick, $msg);
+	$self->send_srv(PRIVMSG => $nick, $msg, {priority => 'low'});
     }
 }
 
@@ -123,27 +123,41 @@ foreach (keys %feedcmds) {
 }
 
 # Overload the send_msg function to make it pad the messages so that we don't flood the server.
+# We also add an optional $opt to the end of the args with a priority option that can be
+# "low", "normal" or "high".  High priority messages go out right away, by-passing the queue.
+# low priority messages are put in a seperate queue and only go out once all high and normal
+# priority messages have been sent.  Default is normal unless we are not registered yet in which
+# case it is high (so that registration is not throttled).
 {
     package AnyEvent::IRC::Client;
     no warnings qw{redefine};
 
     my @msg_queue;
+    my @low_queue;
     my $old_send_msg = \&send_msg;
     my $timer;
     my $timer_cb = sub {
-	if (!@msg_queue) {
+	if (!(@msg_queue || @low_queue)) {
 	    undef $timer;
 	    return;
 	}
 	else {
-	    my $args = shift @msg_queue;
-	    $old_send_msg->(@$args);
+	    my $args = @msg_queue ? shift @msg_queue : shift @low_queue;
+	    $old_send_msg->(@$args) unless !$args;
 	    return;
 	}
     };
 
+# Check the message queue and send the message if it's empty, otherwise queue it.
     *send_msg = sub {
-	# Check the message queue and send the message if it's empty, otherwise queue it.
+	my $self = $_[0];
+	my $opt = {};
+	if (ref $_[-1]) {
+		$opt = pop;
+	}
+
+	my $priority = $opt->{priority} || ($self->{registered} ? 'normal' : 'high');
+
 	if (!$timer) {
 	    $old_send_msg->(@_);
 	    $timer = AnyEvent->timer(
@@ -153,7 +167,15 @@ foreach (keys %feedcmds) {
 				     );
 	    return;
 	}
-	else {
+	elsif ($priority eq 'high') {
+		$old_send_msg->(@_);
+		unshift @msg_queue, undef;
+	}
+	elsif ($priority eq 'low') {
+		push @low_queue, [@_];
+		return;
+	}
+	else { # priority is normal
 	    push @msg_queue, [@_];
 	    return;
 	}
@@ -196,7 +218,7 @@ sub read_feed {
 	my $msg = encode('utf8', "[$title] $etitle @ $link");
 
 	foreach my $chan (@channels) {
-	    $con->send_chan($chan, PRIVMSG => $chan, $msg);
+	    $con->send_chan($chan, PRIVMSG => $chan, $msg, {priority => 'normal'});
 	}
 
 #	print Dumper($hash, $entry);
@@ -262,7 +284,7 @@ $con->reg_cb(ctcp_ping => sub {
 
     $msg = sprintf('Ping time %01.2f seconds', $elapsed);
 #    print Dumper($src, $target, $msg, $type, $elapsed);
-    $self->send_srv(NOTICE => $src, $msg);
+    $self->send_srv(NOTICE => $src, $msg, {priority => 'normal'});
 });
 
 # Debugging
@@ -274,10 +296,10 @@ $con->reg_cb(ctcp_ping => sub {
 # Connection loop
 while (1) {
 	# Identify to NickServ:
-	$con->send_srv(PRIVMSG => 'NickServ', "IDENTIFY $ChatBotSettings::NSpass");
+	$con->send_srv(PRIVMSG => 'NickServ', "IDENTIFY $ChatBotSettings::NSpass", {priority => 'high'});
 
 	# Join channels:
-	$con->send_srv(JOIN => join ',', @channels);
+	$con->send_srv(JOIN => join ',', @channels, {priority => 'high'});
 
 	$con->connect ($host, $port, $info);
 	$c->wait;
