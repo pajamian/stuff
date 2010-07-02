@@ -271,12 +271,17 @@ $con->reg_cb(ctcp_ping => sub {
 #    print Dumper($ircmsg);
 #});
 
-# Identify to NickServ:
-$con->send_srv(PRIVMSG => 'NickServ', "IDENTIFY $ChatBotSettings::NSpass");
+# Connection loop
+while (1) {
+	# Identify to NickServ:
+	$con->send_srv(PRIVMSG => 'NickServ', "IDENTIFY $ChatBotSettings::NSpass");
 
-# Join channels:
-$con->send_srv(JOIN => join ',', @channels);
+	# Join channels:
+	$con->send_srv(JOIN => join ',', @channels);
 
-$con->connect ($host, $port, $info);
-$c->wait;
-$con->disconnect;
+	$con->connect ($host, $port, $info);
+	$c->wait;
+	$con->disconnect;
+
+	sleep 60;
+}
