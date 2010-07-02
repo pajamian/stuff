@@ -49,7 +49,109 @@ my $info = {
     real => $ChatBotSettings::RealName,
 };
 
-my @channels = @ChatBotSettings::Channels;
+my @channels = map { lc } @ChatBotSettings::Channels;
+
+# Logging
+# We call relog when initializing the logs and also whenever we log something new.
+# It checks to see if the date has changed and if so it opens new log files under the new date.
+my $logdir = $ChatBotSettings::LogDir;
+my %log_channels = map {(lc, undef)} @ChatBotSettings::LogChannels;
+my $logdate;
+sub relog {
+    my $today = strftime('%Y%m%d', localtime());
+    return unless $logdate && $logdate ne $today;
+    $logdate = $today;
+
+    while (my($chan, $fh) = each %log_channels) {
+	close $fh if $fh;
+
+	my $path = "$logdir/$chan-$logdate";
+	if (open($fh, '>>', $path)) {
+	    # Enable autoflush for the filehand
+	    my $oldfh = select $fh;
+	    $| = 1;
+	    select $oldfh;
+	    # Return the hash element
+	    $log_channels{$chan} = $fh;
+	}
+	else {
+	    print "Error: Can't open $path for write/append logging of channel $chan: $! ... disabling logging for $chan\n";
+	    delete $log_channels{$chan};
+	}
+    }
+}
+relog();
+
+# Call this with the channel and msg to log stuff.  Automatically prepends a timestamp.
+sub logtext {
+    relog();
+    my ($channel, $msg) = @_;
+    $channel = lc $channel;
+    return unless $log_channels{$channel};
+
+    my $fh = $log_channels{$channel};
+    my $time = strftime('%T', localtime());
+    print $fh "[$time] $msg\n"
+}
+
+my $con = AnyEvent::IRC::Client->new(send_initial_whois => 1);
+
+# Event callbacks for verious events that log
+$con->reg_cb(channel_add => sub {
+    my ($self, $msg, $channel, @nicks) = @_;
+    logtext $channel, "Joins: @nicks";
+	     });
+
+$con->reg_cb(channel_remove => sub {
+    my ($self, $msg, $channel, @nicks) = @_;
+    logtext $channel, "Parts: @nicks";
+	     });
+
+$con->reg_cb(channel_change => sub {
+    my ($self, $msg, $channel, $old_nick, $new_nick) = @_;
+    logtext $channel, "Nick change: $old_nick -> $new_nick";
+	     });
+
+$con->reg_cb(channel_topic => sub {
+    my ($self, $channel, $topic, $who) = @_;
+    foreach ($who, $topic) { $_ ||= '' }
+    logtext $channel, "Topic set by $who: $topic";
+	     });
+
+$con->reg_cb(join => sub {
+    my ($self, $nick, $channel, $is_myself) = @_;
+    return unless $is_myself;
+    logtext $channel, "Joined $channel as $nick";
+	     });
+
+$con->reg_cb(part => sub {
+    my ($self, $nick, $channel, $is_myself) = @_;
+    logtext $channel, "Parted $channel";
+	     });
+
+$con->reg_cb(ctcp_action => sub {
+    my ($self, $nick, $channel, $msg, $type) = @_;
+    return unless $type eq 'PRIVMSG';
+    return if $self->is_my_nick($channel);
+    logtext $channel, "Action: $nick $msg";
+	     });
+
+$con->reg_cb(publicmsg => sub {
+    my ($self, $channel, $ircmsg) = @_;
+    my $msg = $ircmsg->{params}[1];
+    my ($nick) = $ircmsg->{prefix} =~ /^(.*?)!/;
+    logtext $channel, "<$nick> $msg";
+	     });
+
+sub say {
+    my ($chan, $msg) = @_;
+    $con->send_chan($chan, PRIVMSG => $chan, $msg, {priority => 'normal'});
+
+    if ($ChatBotSettings::LogBot) {
+	my $nick = $con->nick();
+	logtext $chan, "<$nick> $msg";
+    }
+}
 
 sub ping {
     my ($self, undef, $nick) = @_;
@@ -62,7 +164,7 @@ sub ping {
 my $public_commands = {
     '!test' => sub {
 	my ($self, $chan, $nick) = @_;
-	$self->send_chan($chan, PRIVMSG => $chan, "$nick: It works!", {priority => 'normal'});
+	say $chan, "$nick: It works!";
     },
     '!ping' => \&ping,
 };
@@ -182,8 +284,6 @@ foreach (keys %feedcmds) {
     };
 }
 
-my $con = AnyEvent::IRC::Client->new(send_initial_whois => 1);
-
 sub read_feed {
     my ($feed_reader, $new_entries, $feed, $error) = @_;
 
@@ -218,7 +318,7 @@ sub read_feed {
 	my $msg = encode('utf8', "[$title] $etitle @ $link");
 
 	foreach my $chan (@channels) {
-	    $con->send_chan($chan, PRIVMSG => $chan, $msg, {priority => 'normal'});
+	    say $chan, $msg;
 	}
 
 #	print Dumper($hash, $entry);

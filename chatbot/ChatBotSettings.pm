@@ -21,6 +21,24 @@ our $NSpass = 'password';
     };
 }
 
+# Channel logging
+our $LogDir = '/path/to/log/dir';
+
+# Set to 0 if you don't want to log bot output to the channel, just the rest of
+# the channel output.
+our $LogBot = 1;
+
+# If you don't want to log all channels comment out the following line and
+# uncomment the next block.
+our @LogChannels = @Channels;
+#{
+#    no warnings qw{qw};
+#    our @LogChannels = qw{
+#      #MyChannel
+#      #MyOtherChannel
+#    };
+#}
+
 # RSS Feeds to monitor (URL / Name)
 our %Feeds = qw{
 	http://twitter.com/statuses/user_timeline/12345678.rss			Twitter
