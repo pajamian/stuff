@@ -1,0 +1,10 @@
+CodeDef namecaseall Filter
+CodeDef namecaseall Description Name case
+CodeDef namecaseall Routine <<EOR
+sub {
+	use locale;
+	my $val = shift;
+	$val =~ s/([A-Za-z][^\s.]*)/\L\u$1/g;
+	return $val;
+}
+EOR

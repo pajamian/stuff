@@ -1,0 +1,30 @@
+CodeDef wordmap Filter
+CodeDef wordmap Description Name case
+CodeDef wordmap Routine <<EOR
+sub {
+	use locale;
+	my $val = shift;
+	shift;
+
+	# This is insane, we're escaping \. to . (which is a feat considering we're already split on .)
+	# \s to a space, and \\ to \ with the following code.
+	foreach (@_) {
+	    s/(\\\\|\\s|\\$)/ (($1 eq q{\\\\}) ? q{\\} : (($1 eq q{\\s}) ? ' ' : '.')) /eg;
+	}
+
+	my @args;
+	while (my $arg = shift) {
+	    while ($arg =~ /\.$/) {
+		my $a = shift;
+		last unless defined $a;
+		$arg .= $a;
+		last unless $a =~ /\.$/;
+	    }
+	    push @args, $arg;
+	}
+	my %wordmap = @args;
+
+	while (my ($from, $to) = each %wordmap) { $val =~ s/\b\Q$from\E\b/$to/ig }
+	return $val;
+}
+EOR

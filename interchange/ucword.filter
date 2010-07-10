@@ -1,0 +1,14 @@
+CodeDef ucword Filter
+CodeDef ucword Description Name case
+CodeDef ucword Routine <<EOR
+sub {
+	use locale;
+	my ($val, undef, $len) = @_;
+	my $lenval = $val;
+	$lenval =~ s/\.//g;
+	if ($val !~ /\s/ && (!$len || length $lenval < $len)) {
+		$val = uc $val;
+	}
+	return $val;
+}
+EOR

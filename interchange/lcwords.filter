@@ -1,0 +1,12 @@
+CodeDef lcwords Filter
+CodeDef lcwords Description Name case
+CodeDef lcwords Routine <<EOR
+sub {
+	use locale;
+	my ($val, undef, @words) = @_;
+	@words = qw{of and for a at the} unless @words;
+	my $words = join '|', @words;
+	$val =~ s/(?<=\S)(\s+)($words)\b/$1\L$2/ig;
+	return $val;
+}
+EOR
