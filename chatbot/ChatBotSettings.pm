@@ -2,6 +2,13 @@
 
 package ChatBotSettings;
 
+# Time Zone
+# If you want the bot to use a different time zone than the default system time
+# zone, then uncomment the following line and set it to the time zone file of
+# your choice.
+#our $TimeZone = 'Pacific/Auckland';
+
+
 # Connection settings
 our $Host = 'irc.example.com';
 our $Port = 6667;

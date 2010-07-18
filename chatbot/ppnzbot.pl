@@ -36,7 +36,7 @@ use AnyEvent::IRC::Client;
 use AnyEvent::Feed;
 
 # Set the time zone
-$ENV{TZ} = 'Pacific/Auckland';
+$ENV{TZ} = $ChatBotSettings::TimeZone if $ChatBotSettings::TimeZone;
 tzset();
 
 my $c = AnyEvent->condvar;
