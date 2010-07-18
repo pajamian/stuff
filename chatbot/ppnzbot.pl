@@ -59,7 +59,7 @@ my %log_channels = map {(lc, undef)} @ChatBotSettings::LogChannels;
 my $logdate;
 sub relog {
     my $today = strftime('%Y%m%d', localtime());
-    return unless $logdate && $logdate ne $today;
+    return if $logdate && $logdate ne $today;
     $logdate = $today;
 
     while (my($chan, $fh) = each %log_channels) {
@@ -91,43 +91,108 @@ sub logtext {
 
     my $fh = $log_channels{$channel};
     my $time = strftime('%T', localtime());
-    print $fh "[$time] $msg\n"
+    print $fh "[$time] $msg\n";
+#    print "$channel: [$time] $msg\n";
 }
 
 my $con = AnyEvent::IRC::Client->new(send_initial_whois => 1);
 
 # Event callbacks for verious events that log
+
+# Log when nicks join channel:
 $con->reg_cb(channel_add => sub {
     my ($self, $msg, $channel, @nicks) = @_;
-    logtext $channel, "Joins: @nicks";
+    if (@nicks > 1) {
+	my $nickmodes = $self->channel_list($channel);
+	my @modes = (
+	    [v => '+'],
+	    [h => '%'],
+	    [o => '@'],
+	    [a => '&'],
+	    );
+
+	foreach my $nick (@nicks) {
+	    my $onick = $nick;
+	    foreach my $mode (@modes) {
+		if ($nickmodes->{$onick}{$mode->[0]}) {
+		    $nick = $mode->[1] . $nick;
+		}
+	    }
+	}
+
+	logtext $channel, "In channel: @nicks";
+    }
+    elsif ($self->is_my_nick($nicks[0])) {
+	logtext $channel, "Joined $channel as $nicks[0]";
+    }
+    else {
+	logtext $channel, "Joins: @nicks";
+    }
 	     });
 
+# Log when nicks part channel:
 $con->reg_cb(channel_remove => sub {
-    my ($self, $msg, $channel, @nicks) = @_;
-    logtext $channel, "Parts: @nicks";
+    my ($self, $ircmsg, $channel, $nick) = @_;
+    my $msg = $ircmsg->{params}[1] || $ircmsg->{params}[0];
+    my $src = $ircmsg->{params}[2];
+    my $cmd = $ircmsg->{command};
+    if ($self->is_my_nick($nick)) {
+	$nick = 'I';
+    }
+
+    my %cmdmap = (
+	PART => 'parted',
+	QUIT => 'quit',
+	KICK => 'was kicked from',
+	);
+    $cmd = $cmdmap{$cmd} || $cmd;
+
+    my $out = "$nick $cmd $channel";
+    $out .= " by $src" if $src;
+    $out .= ": $msg";
+    logtext $channel, $out;
 	     });
 
-$con->reg_cb(channel_change => sub {
-    my ($self, $msg, $channel, $old_nick, $new_nick) = @_;
-    logtext $channel, "Nick change: $old_nick -> $new_nick";
+$con->reg_cb(nick_change => sub {
+    my ($self, $old_nick, $new_nick) = @_;
+    my $channels = $self->channel_list();
+    while (my ($chan, $nicks) = each %$channels) {
+	next unless $nicks->{$new_nick};
+	logtext $chan, "Nick change: $old_nick -> $new_nick";
+    }
 	     });
 
 $con->reg_cb(channel_topic => sub {
     my ($self, $channel, $topic, $who) = @_;
-    foreach ($who, $topic) { $_ ||= '' }
-    logtext $channel, "Topic set by $who: $topic";
+    $topic ||= '';
+    $who = ($who ? " set by $who" : '');
+    logtext $channel, "Topic$who: $topic";
 	     });
 
-$con->reg_cb(join => sub {
-    my ($self, $nick, $channel, $is_myself) = @_;
-    return unless $is_myself;
-    logtext $channel, "Joined $channel as $nick";
-	     });
+# All other commands have to use the debug_recv event
+$con->reg_cb(debug_recv => sub {
+    my ($self, $ircmsg) = @_;
+    my $cmd = $ircmsg->{command};
 
-$con->reg_cb(part => sub {
-    my ($self, $nick, $channel, $is_myself) = @_;
-    logtext $channel, "Parted $channel";
-	     });
+# Log when tehre is a mode change.  There is a specific event for this, but stupidly it only gives the
+# channel and nick but not the mode changes themselves or who the source of the mode change was.
+    if ($cmd eq 'MODE') {
+	my $src = $ircmsg->{prefix};
+	$src =~ s/!.*//;
+	my ($chan, $modes, @nicks) = @{$ircmsg->{params}};
+
+	logtext $chan, "$src sets modes [$chan $modes @nicks]";
+    }
+
+# Log who was the person who set the current topic and when (this gets sent by the server on channel join).
+    elsif ($cmd eq '333') {
+	my (undef, $chan, $nick, $time) = @{$ircmsg->{params}};
+	$time = localtime($time);
+	logtext $chan, "Topic set by $nick at $time";
+    }
+
+#    else { print Dumper($ircmsg) }
+});
 
 $con->reg_cb(ctcp_action => sub {
     my ($self, $nick, $channel, $msg, $type) = @_;
@@ -386,12 +451,6 @@ $con->reg_cb(ctcp_ping => sub {
 #    print Dumper($src, $target, $msg, $type, $elapsed);
     $self->send_srv(NOTICE => $src, $msg, {priority => 'normal'});
 });
-
-# Debugging
-#$con->reg_cb(debug_recv => sub {
-#    my ($self, $ircmsg) = @_;
-#    print Dumper($ircmsg);
-#});
 
 # Connection loop
 while (1) {
