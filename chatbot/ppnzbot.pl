@@ -174,7 +174,7 @@ $con->reg_cb(debug_recv => sub {
     my ($self, $ircmsg) = @_;
     my $cmd = $ircmsg->{command};
 
-# Log when tehre is a mode change.  There is a specific event for this, but stupidly it only gives the
+# Log when there is a mode change.  There is a specific event for this, but stupidly it only gives the
 # channel and nick but not the mode changes themselves or who the source of the mode change was.
     if ($cmd eq 'MODE') {
 	my $src = $ircmsg->{prefix};
@@ -295,55 +295,109 @@ foreach (keys %feedcmds) {
 # low priority messages are put in a seperate queue and only go out once all high and normal
 # priority messages have been sent.  Default is normal unless we are not registered yet in which
 # case it is high (so that registration is not throttled).
+# Update: We will now maintain a separate queue for each nick and add a method to purge the queue
+# for a particular nick.  This allows us to rotate through the various nick queues so that we don't
+# block other nicks for an hour because someone sent 120 "!twitter 30" commands in a row.
+# We will also add in a method to rename a queue in case someone changes their nick and we will
+# purge a queue if the corresponding nick comes back with a "no such nick" error, or if we recieve
+# an ident change event for the nick or if the person issues a !stop command.
 {
     package AnyEvent::IRC::Client;
     no warnings qw{redefine};
 
-    my @msg_queue;
-    my @low_queue;
+    my @low_nicks;
+    my @norm_nicks;
+    my %msg_queue;
+    my %low_queue;
+    my $high_counter = 0;
     my $old_send_msg = \&send_msg;
     my $timer;
     my $timer_cb = sub {
-	if (!(@msg_queue || @low_queue)) {
-	    undef $timer;
-	    return;
-	}
-	else {
-	    my $args = @msg_queue ? shift @msg_queue : shift @low_queue;
-	    $old_send_msg->(@$args) unless !$args;
-	    return;
+	# Loop so that we can skip purged nicks.
+	while (1) {
+	    if ($high_counter > 0) {
+		$high_counter--;
+		return;
+	    }
+
+	    if (@norm_nicks) {
+		my $nick = shift @norm_nicks;
+		if (!$msg_queue{$nick} || !@{$msg_queue{$nick}}) {
+		    # The queue for this nick has been purged or run out, skip to the next nick.
+		    next;
+		}
+
+		my $args = shift @{$msg_queue{$nick}};
+		$old_send_msg->(@$args) unless !$args;
+#		print "Send NORM: $nick: " . ::Dumper([@{$args}[1..$#$args]]);
+		push @norm_nicks, $nick;
+		return;
+	    }
+
+	    elsif (@low_nicks) {
+		my $nick = shift @low_nicks;
+		if (!$low_queue{$nick} || !@{$low_queue{$nick}}) {
+		    # The queue for this nick has been purged or run out, skip to the next nick.
+		    next;
+		}
+
+		my $args = shift @{$low_queue{$nick}};
+		$old_send_msg->(@$args) unless !$args;
+#		print "Send LOW: $nick: " . ::Dumper([@{$args}[1..$#$args]]);
+		push @low_nicks, $nick;
+		return;
+	    }
+
+	    else {
+		undef $timer;
+		return;
+	    }
 	}
     };
 
 # Check the message queue and send the message if it's empty, otherwise queue it.
     *send_msg = sub {
-	my $self = $_[0];
+	my ($self, $cmd, $nick) = @_;
 	my $opt = {};
 	if (ref $_[-1]) {
 		$opt = pop;
 	}
 
-	my $priority = $opt->{priority} || ($self->{registered} ? 'normal' : 'high');
+	my $priority = $opt->{priority} || (!$self->{registered} || $cmd !~ /^PRIVMSG|NOTICE$/ ? 'high' : 'normal');
+	$nick = lc $nick;
 
 	if (!$timer) {
 	    $old_send_msg->(@_);
 	    $timer = AnyEvent->timer(
-				     after => 1,
-				     interval => 1,
+				     after => 3,
+				     interval => 3,
 				     cb => $timer_cb,
 				     );
 	    return;
 	}
 	elsif ($priority eq 'high') {
-		$old_send_msg->(@_);
-		unshift @msg_queue, undef;
+	    $old_send_msg->(@_);
+	    $high_counter++;
+#	    print "Queue/Send HIGH: $nick: " . ::Dumper([@_[1..$#_]]);
 	}
 	elsif ($priority eq 'low') {
-		push @low_queue, [@_];
-		return;
+	    if (!$low_queue{$nick} || !@{$low_queue{$nick}}) {
+		push @low_nicks, $nick;
+	    }
+
+	    $low_queue{$nick} ||= [];
+	    push @{$low_queue{$nick}}, [@_];
+#	    print "Queue LOW: $nick" . ::Dumper([@_[1..$#_]]);
+	    return;
 	}
 	else { # priority is normal
-	    push @msg_queue, [@_];
+	    if (!$msg_queue{$nick} || !@{$msg_queue{$nick}}) {
+		push @norm_nicks, $nick;
+	    }
+
+	    $msg_queue{$nick} ||= [];
+	    push @{$msg_queue{$nick}}, [@_];
+#	    print "Queue NORM: $nick: " . ::Dumper([@_[1..$#_]]);
 	    return;
 	}
     };
