@@ -401,7 +401,45 @@ foreach (keys %feedcmds) {
 	    return;
 	}
     };
+
+    sub purge_queue {
+	my ($self, $nick) = @_;
+	$nick = lc $nick;
+	delete $msg_queue{$nick};
+	delete $low_queue{$nick};
+    }
+
+    sub rename_queue {
+	my ($self, $oldnick, $newnick) = @_;
+	$oldnick = lc $oldnick;
+	$newnick = lc $newnick;
+	my $norm = delete $msg_queue{$oldnick};
+	my $low = delete $low_queue{$oldnick};
+
+	if ($norm) {
+	    foreach my $args (@$norm) {
+		$args->[2] = $newnick;
+	    }
+	    $msg_queue{$newnick} = $norm;
+	    push @norm_nicks, $newnick;
+	}
+
+	if ($low) {
+	    foreach my $args (@$low) {
+		$args->[2] = $newnick;
+	    }
+	    $low_queue{$newnick} = $low;
+	    push @low_nicks, $newnick;
+	}
+    }
 }
+
+# Events and subs to support the message queue system above
+$con->reg_cb(nick_change => sub {
+    my ($self, $old_nick, $new_nick) = @_;
+    return if $self->is_my_nick($new_nick);
+    $self->rename_queue($old_nick, $new_nick);
+	     });
 
 sub read_feed {
     my ($feed_reader, $new_entries, $feed, $error) = @_;
