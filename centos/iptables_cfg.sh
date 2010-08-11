@@ -12,6 +12,7 @@ IPTABLES=/sbin/iptables
 # Flush all current rules from iptables
 #
  $IPTABLES -F
+ $IPTABLES -X
 #
 # Set default policies for INPUT, FORWARD and OUTPUT chains
 #
