@@ -1,0 +1,75 @@
+#!/bin/sh
+#
+# Gtkdialog to execute program under sudo from a WM menu.
+# (c) SliTaz GNU/Linux 2008-2010 - GNU gpl.
+#
+# Modified from subox by Peter Ajamian <peter@pajamian.dhs.org> on 11 Oct 2010
+#
+VERSION=20100324
+
+# Usage.
+if [ -z "$1" ]; then
+    echo "Slitaz sudobox version : $VERSION"
+    echo -e "\nUsage : subox program\n"
+    exit 0
+fi
+
+# First try to run the command without a password
+sudo -n -b $1
+if test $? -ne 1; then
+	exit 0
+fi
+
+# Include gettext helper script.
+. /usr/bin/gettext.sh
+
+# Export package name for gettext.
+TEXTDOMAIN='sudobox'
+export TEXTDOMAIN
+
+# Keep command in an exported variable to be used by SU_DIALOG.
+export SU_CMD=$1
+
+# Main window and root password default entry set to 'root'.
+SU_DIALOG='
+<window title="Sudobox" skip_taskbar_hint="true">
+<vbox>
+
+	<text use-markup="true">
+		<label>"
+<b>SliTaz - Sudobox</b>"
+		</label>
+	</text>
+	<text wrap="true" width-chars="50">
+		<label>"'`gettext "
+Please enter your password to execute :"`'
+'$@'
+"
+		</label>
+	</text>
+	
+	<hbox>
+		<text use-markup="true">
+			<label>"'`gettext "<b>Password :</b>"`'"</label>
+		</text>
+		<entry visibility="false">'
+
+export SU_DIALOG=''${SU_DIALOG}'
+			<variable>PASSWD</variable>
+		</entry>
+	</hbox>
+	
+	<hbox>
+		<button ok>
+			<action>echo $PASSWD | sudo -S -b "$SU_CMD" >&2</action>
+			<action type="closewindow">SU_DIALOG</action>
+		</button>
+		<button cancel></button>
+	</hbox>
+
+</vbox>
+</window>'
+
+gtkdialog --center --program=SU_DIALOG > /dev/null
+
+exit 0
