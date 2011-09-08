@@ -58,7 +58,7 @@ IPTABLES=/sbin/iptables
 #
 # List rules
 #
- $IPTABLES -L -v
+ $IPTABLES -L -n -v
 
 #
 # IPv6 Support - Basically put, IPv6 uses separate tables to IPv4, so you have
@@ -110,4 +110,4 @@ IPTABLES=/sbin/iptables
 #
 # List rules
 #
-#$IP6TABLES -L -v
+#$IP6TABLES -L -n -v
