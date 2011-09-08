@@ -7,7 +7,7 @@
 # Location of iptables binary
 IPTABLES=/sbin/iptables
 
-/etc/init.d/iptables start
+/sbin/service iptables start
 
 # Flush all current rules from iptables
 #
@@ -53,7 +53,7 @@ IPTABLES=/sbin/iptables
 #
 # Save settings
 #
-/etc/init.d/iptables save
+/sbin/service iptables save
 #
 # List rules
 #
