@@ -1,0 +1,379 @@
+# Copyright (C) 2007 Uber Ego / Slave Labor Productions
+# Copyright (C) 2007 Peter Ajamian <peter@pajamian.dhs.org>
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301,
+# USA.
+#
+# $id$
+
+UserTag graph Order		type labels data
+UserTag graph addAttr
+UserTag graph NoReparse		1
+UserTag graph Description	Use GD::Graph to generate and display graphs.
+UserTag graph Version		$Revision$
+
+UserTag graph Documentation	<<EOD
+
+Documentation for the graph usertag.
+
+attributes:
+
+You can use any of the following attributes, plus any of the options documented
+  at <http://search.cpan.org/~bwarfield/GDGraph-1.44/Graph.pm> plus any of the
+  methods also documented at
+  <http://search.cpan.org/~bwarfield/GDGraph-1.44/Graph.pm> that begin with
+  set_.  There are three ways to pass an attribute (or option or method).  In
+  addition to passing them as attributes to the tag you can set them in catalog
+  level variables by prefixing with GRAPH_ (ex: GRAPH_WIDTH) or set them as
+  scratches by prefixing with graph_ (ex: graph_width).
+
+Better documentation for this may come later.
+
+width, height - image size
+
+type - lines, bars, hbars, points, linespoints, area, pie
+
+title - title of graph
+
+x_label - x-axis label for graph
+y_label - y-axis label for graph
+
+data - arrayref of arrayrefs - Data for graph or alternatively use query
+  instead.
+
+nullto - value to set NULL (undef) to if you prefer to not pass it as missing
+  data (undef).
+
+labels - arrayref of labels for x-axis stops
+
+table - table name for query.  If not specified will attempt to guess from the
+  query.
+
+query - SQL query returning data to populate the graph with.  The first column
+  returned is the code or label of the dataset, the second column is the x-axis
+  label and the 3rd column is the y-axis point.
+
+filename - output filename, defaults to an md5 hash of the input data.
+
+imgdir - directory containing image files, defaults to ImageDir.
+
+subdir - directory containing graphs as subdir of imgdir, defaults to "graphs".
+
+overwrite_file - If set to 1 will overwrite the output file if it exists.
+
+filetype - type of file to output (jpg, gif, png, gd2, xpm), can be an arrayref
+  of file types to test in order in case one or more types is not supported.
+  Defaults to the type returned by the export_format method.
+
+imgtag - returns an image tag instead of just the filename.
+
+EOD
+
+UserTag graph Routine		<<EOR
+use Digest::MD5 qw(md5_hex);
+use Data::Dumper;
+
+sub {
+	# sub to compare a scalar or arrayref against another arrayref and
+	# return the first match.  Returns the first matching element of a
+	# or undef.
+	my $ainb = sub {
+		my ($a, $b) = @_;
+		$a = [$a] unless ref($a);
+		my %hash_b;
+		@hash_b{@$b} = (1) x @$b;
+		foreach (@$a) {
+			return $_ if $hash_b{$_};
+		}
+		return;
+	};
+
+	# Everything we need is in $opt which is at the end of @_.
+	my $opt = pop;
+	$opt = {%$opt}; # Make a copy.
+
+	# Load $opt defaults from scratch and variable space
+	# keys makes a copy here so we're not modifying %$::Scratch.
+	foreach (keys %$::Scratch) {
+		next unless s/^graph_//;
+		$opt->{$_} = $::Scratch->{"graph_$_"} unless defined $opt->{$_};
+	}
+
+	foreach (keys %$::Variable) {
+		next unless s/^GRAPH_//;
+		$opt->{lc $_} = $::Variable->{"GRAPH_$_"}
+			unless defined $opt->{lc $_};
+	}
+
+	my (
+		$type,
+		$labels,
+		$labels_format,
+		$legend_format,
+		$data,
+		$width,
+		$height,
+		$table,
+		$query,
+		$filename,
+		$imgdir,
+		$subdir,
+		$filetype,
+		$imgtag,
+		$overwrite,
+		$umask,
+	) = delete @{$opt}{qw(
+		type
+		labels
+		labels_format
+		legend_format
+		data
+		width
+		height
+		table
+		query
+		filename
+		imgdir
+		subdir
+		filetype
+		imgtag
+		overwrite_file
+		umask
+	)};
+
+	# Any attribute that starts with "set_" we consider to be a method
+	# call.
+	my %methods;
+	{
+		my @keys = grep { /^set_/ } keys %$opt;
+		@methods{@keys} = delete @{$opt}{@keys};
+	}
+
+	# There's some universal attributes that we don't want to pass to
+	# GD::Graph or it will complain.
+	delete @{$opt}{qw(
+		interpolate
+		reparse
+	)};
+
+	# Initialize some other vars.
+	$data = [split(/(?:,|\s+)/, $data)] unless ref($data);
+	$data = [$data] unless ref($data->[0]);
+
+	$labels = [] unless $labels;
+	$labels = [split(/(?:,|\s+)/, $labels)] unless ref($labels);
+
+	if (defined $umask) {
+		$umask = oct($umask);
+	} else {
+		$umask = umask;
+	}
+
+	# Width and height default to 400x300.  GD::Graph also sets those
+	# defaults, but the way we pass the vars onto GD::Graph will wipe them
+	# out, so we just default them here.
+	$width = 400 unless defined $width;
+	$height = 300 unless defined $height;
+
+	# If there's a query run it and populate the data from that.
+	if ($query) {
+		unless ($table) {
+			# Try to guess the table name.
+			$query =~ /from\s+(\S+)/i
+				or die "Can't derive table name from query:\n$query";
+			$table = $1;
+		}
+
+		my $db = Vend::Data::database_exists_ref($table)
+			or die "Can't open table $table";
+
+		my $results = $db->query($query)
+			or die "Can't run query on table $table:\n$query";
+
+		# Get the sort order from any existing legend passed to us
+		# or create a new legend from the query results.
+		my $legend = $methods{set_legend};
+		$legend = [split(/(?:,|\s+)/, $legend)] unless ref($legend);
+		my %d;
+		@d{@$legend} = ({}) x @$legend;
+
+		# Also get the sort order for the labels, or create a new
+		# labels block.
+		my %l;
+		@l{@$labels} = (1) x @$labels;
+
+		# Loop through the results and populate the "d" (for data)
+		# hash.
+		foreach (@$results) {
+			my ($dataset, $label, $value) = @$_;
+
+			push(@$legend, $dataset) unless exists $d{$dataset};
+			unless (exists $l{$label}) {
+				push(@$labels, $label);
+				$l{$label} = 1;
+			}
+			$d{$dataset}{$label} = $value;
+		}
+
+		$methods{set_legend} = $legend;
+
+		$data = [];
+		foreach (@$legend) {
+			push(@$data, [@{$d{$_}}{@$labels}]);
+		}
+	}
+
+	# We want the opportunity to format the legend and labels as well as
+	# other data, but GD::Graph doesn't provide it, so we imitate the
+	# functionality here.
+	if (defined $labels_format) {
+		if (ref($labels_format)) {
+			$_ = &$labels_format($_) foreach (@$labels);
+		} else {
+			$_ = sprintf($labels_format, $_) foreach (@$labels);
+		}
+	}
+
+	if (defined $legend_format) {
+		if (ref($legend_format)) {
+			$_ = &$legend_format($_)
+				foreach (@{$methods{set_legend}});
+		} else {
+			$_ = sprintf($legend_format, $_)
+				foreach (@{$methods{set_legend}});
+		}
+	}
+
+	# labels is actually the first line of data.
+	unshift (@$data, $labels);
+
+	# Other suitable defaults:
+	$imgdir = $Vend::Cfg->{ImageDir} unless defined $imgdir;
+	$imgdir =~ s:^/::;
+
+	$subdir = 'graphs' unless defined $subdir;
+
+#::logDebug('opt=' . ::uneval($opt));
+#::logDebug('methods=' . ::uneval(\%methods));
+#::logDebug('data=' . ::uneval($data));
+
+	# Calculate a filename if needed by dumping all input data to text and
+	# hashing with MD5.
+	unless (defined $filename) {
+		# We have to sort the hashkeys in Data::Dumper to ensure they
+		# always print in the same order.
+		my $sortkeys = $Data::Dumper::Sortkeys;
+		$Data::Dumper::Sortkeys = 1;
+
+		$filename = md5_hex(::uneval([
+			$type,
+			$data,
+			$width,
+			$height,
+			$opt,
+			\%methods,
+		]));
+
+		$Data::Dumper::Sortkeys = $sortkeys;
+	}
+
+	# Compose filename into a single path and check if we should skip
+	# creating the graph.
+
+	# Initialize graph object.  I'm still looking for a better way
+	# than eval here.
+	eval "use GD::Graph::${type}";
+	if ($@) {
+		::logError "Invalid type: $type";
+		return;
+	}
+
+	my $graph = eval "GD::Graph::${type}->new(\$width, \$height)";
+	die $@ if $@;
+
+	# Figure out the extension we want.
+	if (!$filetype) {
+		$filetype = $graph->export_format
+			|| ($graph->export_format)[0]
+			or die "GD::Graph doesn't support any file formats.";
+	} else {
+		$filetype = [split(/[,\s]+/,$filetype)]
+			unless ref($filetype);
+		$filetype = $ainb->($filetype, [$graph->export_format]);
+		unless ($filetype) {
+			::logError "No matching file format found.";
+			return;
+		}
+	}
+
+	$filename .= ".$filetype";
+	my $path = "$imgdir$subdir/$filename";
+
+	if ($overwrite || ! -e $path) {
+		# Run the various methods first.
+		while (my ($method, $attrib) = each %methods) {
+			if (ref($attrib) eq 'ARRAY') {
+				$graph->$method(@$attrib);
+			} elsif (ref($attrib) eq 'HASH') {
+				$graph->$method(%$attrib);
+			} else {
+				$graph->$method($attrib);
+			}
+			$graph->has_warning and ::logError $graph->warning;
+			if ($graph->has_error) {
+				::logError $graph->error;
+				return;
+			}
+			$graph->clear_errors;
+		}
+
+		# Set the options.
+		$graph->set(%$opt);
+		$graph->has_warning and ::logError $graph->warning;
+		if ($graph->has_error) {
+			::logError $graph->error;
+			return;
+		}
+		$graph->clear_errors;
+
+		# Plot the graph
+		my $gd = $graph->plot($data);
+		$graph->has_warning and ::logError $graph->warning;
+		if ($graph->has_error) {
+			::logError $graph->error;
+			return;
+		}
+		$graph->clear_errors;
+
+		my $output = $gd->$filetype();
+#::logDebug('gd output=' . $output);
+
+		# Save the graph
+		my $umask = umask $umask;
+		unless (open(IMG, '>', $path)) {
+			::logError "Can't open file $path for writing: $!";
+			return;
+		}
+		binmode IMG;
+		print IMG $output . '';
+		close IMG;
+		umask $umask;
+	}
+
+	# Return the filename or the full image tag.
+	return "$subdir/$filename" unless $imgtag;
+	return qq{<img src="$subdir/$filename" width="$width" height="$height"$Vend::Xtrailer>};
+}
+EOR
