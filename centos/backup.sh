@@ -22,7 +22,7 @@ fi
 domlist=`ls -1 $domuconfig | grep -vP "$domuexclude"`
 
 # Make sure there is enough space on the backup server
-while ssh a1825@backup 'df -PB1G .' | perl -le 'exit((split /\s+/, (<STDIN>)[1])[3] < $ARGV[0] ? 0 : 1)' $minsize; do
+while ssh "$sshlogin" 'df -PB1G .' | perl -le 'exit((split /\s+/, (<STDIN>)[1])[3] < $ARGV[0] ? 0 : 1)' $minsize; do
     # We need to make some room, get rid of old backups, daily first then weekly then monthly
     ssh $sshlogin "
 	if [[ -n \`ls -1 '$remotepath/daily/'\` ]]; then
@@ -49,7 +49,7 @@ for dom in dom0 $domlist; do
     else
 	# Create a snapshot and mount it
 	umount -l "$domumount" 2>/dev/null
-	lvcreate -L10G -n "$snapvol" -s "$lvpath/$dom" >/dev/null
+	lvcreate -L10G -n "$snapvol" -s "$lvpath/$dom" 2>&1 >/dev/null | /bin/grep -vF 'File descriptor 3 (/) leaked on'
 	mount "$lvpath/$snapvol" "$domumount"
 	lpath="$domumount/"
     fi
@@ -69,7 +69,7 @@ for dom in dom0 $domlist; do
     if [[ $dom != 'dom0' ]]; then
     # Unmount the snapshot and delete it.
 	umount -l $domumount
-	lvremove -f $lvpath/$snapvol >/dev/null
+	lvremove -f $lvpath/$snapvol 2>&1 >/dev/null | /bin/grep -vF 'File descriptor 3 (/) leaked on'
     fi
 done
 
