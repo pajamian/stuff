@@ -7,9 +7,9 @@
 # shellcheck disable=SC2142
 alias getopts='_getopts "$#" "$@"'
 _getopts(){
-    local help usage
+    local _getopts_help _getopts_usage
     # shellcheck disable=SC2154
-    IFS= read -r -d '' help <<EOF
+    IFS= read -r -d '' _getopts_help <<EOF
 getopts optstring name [arg ...]
 Parse option arguments.
 
@@ -68,11 +68,12 @@ Exit Status:
 Returns success if an option is found; fails if the end of options is
 encountered or an error occurs.
 EOF
-    local -a helpa
-    readarray helpa <<<"$help"
-    usage="getopts: usage: ${helpa[0]%$'\n'}"
-    helpa=("${helpa[@]:1}")
-    printf -v help '%s' "getopts: ${helpa[0]}" "${helpa[@]/#/    }"
+    local -a _getopts_helpa
+    readarray _getopts_helpa <<<"$_getopts_help"
+    _getopts_usage="getopts: usage: ${_getopts_helpa[0]%$'\n'}"
+    _getopts_helpa=("${_getopts_helpa[@]:1}")
+    printf -v _getopts_help '%s' "getopts: ${_getopts_helpa[0]}" \
+	   "${_getopts_helpa[@]/#/    }"
     
     # This can't happen if the funtion is invoked from the alias wrapper.
     (( $#<1 )) && return 1
@@ -82,44 +83,44 @@ EOF
     [[ $OPTERR == '' ]] && OPTERR=1
 
     # Get the number of args into argc.
-    local argc=$1
+    local _getopts_argc=$1
     shift
 
     # This can't happen either unless the function is invoked directly.
-    (( $#<argc )) && return 1
+    (( $#<_getopts_argc )) && return 1
 
     # Get the args themselves into argv.
-    local -a argv=("${@:1:$argc}")
-    shift "$argc"
+    local -a _getopts_argv=("${@:1:$_getopts_argc}")
+    shift "$_getopts_argc"
 
     # Display help and exit.
     if [[ $1 == --help ]]; then
-	printf '%s' "$help" >&2
+	printf '%s' "$_getopts_help" >&2
 	return 0
     fi
     
     # Two required args, otherwise display usage.
     (( $# < 2 )) && {
-	printf '%s\n' "$usage" >&2
+	printf '%s\n' "$_getopts_usage" >&2
 	return 1
     };
-    local optstring=$1
+    local _getopts_optstring=$1
     local -n _getopts_name=$2
     shift 2
 
     # Setting : to indicate special error handling.
-    local special_error=0
-    if [[ $optstring == :* ]]; then
-	optstring=${optstring#:}
-	special_error=1
+    local _getopts_special_error=0
+    if [[ $_getopts_optstring == :* ]]; then
+	_getopts_optstring=${_getopts_optstring#:}
+	_getopts_special_error=1
 	OPTERR=0
     fi
     
     # If there's any args left then we need to use them instead of the ones we
     # saved into argv.
     if (( $# )); then
-	argc=$#
-	argv=("$@")
+	_getopts_argc=$#
+	_getopts_argv=("$@")
     fi
 
     # Make sure OPTIND doesn't have a bad attribute
@@ -141,10 +142,10 @@ EOF
     (( OPTIND[1] )) || OPTIND[1]=1
     
     # Grab the appropriate arg
-    local arg=${argv[OPTIND[0]-1]}
+    local _getopts_arg=${_getopts_argv[OPTIND[0]-1]}
 
     # Check for end of args
-    if [[ $arg == '--' ]]; then
+    if [[ $_getopts_arg == '--' ]]; then
 	(( ++OPTIND[0] ))
 	OPTIND[1]=1
 	OPTARG=
@@ -153,7 +154,7 @@ EOF
     fi
     
     # Must start with a dash (-).
-    if [[ $arg != -* ]]; then
+    if [[ $_getopts_arg != -* ]]; then
 	OPTARG=
 	_getopts_name=\?
 	return 1
@@ -174,52 +175,53 @@ EOF
 _getopts_longopts(){
     # Check to make sure that we're processing long opts and that this looks
     # like one.
-    if (( OPTIND[1] > 1 )) || [[ ${LONGOPTS@a} != *A* || $arg != --* ]]; then
+    if (( OPTIND[1] > 1 )) || [[ ${LONGOPTS@a} != *A* || $_getopts_arg != --* ]]
+    then
 	return 0
     fi
 
     # This looks like a long opt.
-    local n=${arg#--}
-    n=${n%%=*}
-    local v
-    [[ $arg == *=* ]] && v=${arg#*=}
+    local _getopts_n=${_getopts_arg#--}
+    _getopts_n=${_getopts_n%%=*}
+    local _getopts_v
+    [[ $_getopts_arg == *=* ]] && _getopts_v=${_getopts_arg#*=}
 
     # Pre set these.
     (( ++OPTIND[0] ))
     _getopts_name=\?
     OPTARG=
-    (( special_error )) && OPTARG=$n
+    (( _getopts_special_error )) && OPTARG=$_getopts_n
 
     # Illegal option check
-    if [[ ! -v LONGOPTS[$n] ]]; then
-	(( OPTERR )) && printf '%s: illegal option -- %s\n' "$0" "$n"
+    if [[ ! -v LONGOPTS[$_getopts_n] ]]; then
+	(( OPTERR )) && printf '%s: illegal option -- %s\n' "$0" "$_getopts_n"
 	return 1
     fi
 
     # Required arg check
-    local flags=${LONGOPTS[$n]}
-    if [[ $flags == : ]]; then
-	[[ ! $v ]] && (( argc <= OPTIND[0] )) && {
-	    (( special_error )) && _getopts_name=:
+    local _getopts_flags=${LONGOPTS[$_getopts_n]}
+    if [[ $_getopts_flags == : ]]; then
+	[[ ! $_getopts_v ]] && (( _getopts_argc <= OPTIND[0] )) && {
+	    (( _getopts_special_error )) && _getopts_name=:
 	    (( OPTERR )) && printf '%s: option requires an argument -- %s\n' \
 				   "$0" "$n"
 	    return 1
 	}
-	v=${argv[OPTIND[0]++-1]}
+	_getopts_v=${_getopts_argv[OPTIND[0]++-1]}
     fi
 
     # No arg check
-    if [[ $flags != [:?] && $v ]]; then
-	(( special_error )) && _getopts_name=
+    if [[ $_getopts_flags != [:?] && $_getopts_v ]]; then
+	(( _getopts_special_error )) && _getopts_name=
 	(( OPTERR )) && printf '%s: option may not have an argument -- %s\n' \
-			       "$0" "$n"
+			       "$0" "$_getopts_n"
 	return 1
     fi
 
     # Everything checks out.
     OPTIND[1]=1
-    OPTARG=$v
-    _getopts_name=$n
+    OPTARG=$_getopts_v
+    _getopts_name=$_getopts_n
     return 1
 }
 
@@ -228,51 +230,51 @@ _getopts_longopts(){
 # Subtract one from the exit code and exit the parent function.
 #
 _getopts_shortopts(){
-    local n=${arg:OPTIND[1]++:1}
-    local v
+    local _getopts_n=${_getopts_arg:OPTIND[1]++:1}
+    local _getopts_v
     
     # Illegal option check
-    if [[ $optstring != *"$n"* ]]; then
-	(( OPTERR )) && printf '%s: illegal option -- %s\n' "$0" "$n"
+    if [[ $_getopts_optstring != *"$_getopts_n"* ]]; then
+	(( OPTERR )) && printf '%s: illegal option -- %s\n' "$0" "$_getopts_n"
 	return 1
     fi
 
     # Pre set these.
-    local flags=${optstring#*"$n"}
-    flags=${flags:0:1}
-    [[ $flags == [:?] ]] && (( ++OPTIND[1] ))
+    local _getopts_flags=${_getopts_optstring#*"$_getopts_n"}
+    _getopts_flags=${_getopts_flags:0:1}
+    [[ $_getopts_flags == [:?] ]] && (( ++OPTIND[1] ))
     
-    if (( ${#arg} <= OPTIND[1] )); then
+    if (( ${#_getopts_arg} <= OPTIND[1] )); then
 	(( ++OPTIND[0] ))
 	OPTIND[1]=1
     fi
     _getopts_name=\?
     OPTARG=
-    (( special_error )) && OPTARG=$n
+    (( _getopts_special_error )) && OPTARG=$_getopts_n
 
     # Required arg check and return arg passed after white space.
-    if [[ $flags == : ]] && (( OPTIND[1] == 1 )); then
-	(( OPTIND[0] >= argc )) && {
-	    (( special_error )) && _getopts_name=:
+    if [[ $_getopts_flags == : ]] && (( OPTIND[1] == 1 )); then
+	(( OPTIND[0] >= _getopts_argc )) && {
+	    (( _getopts_special_error )) && _getopts_name=:
 	    (( OPTERR )) && printf '%s: option requires an argument -- %s\n' \
-				   "$0" "$n"
+				   "$0" "$_getopts_n"
 	    return 1
 	}
-	OPTARG=${argv[OPTIND[0]++]}
-	_getopts_name=$n
+	OPTARG=${_getopts_argv[OPTIND[0]++]}
+	_getopts_name=$_getopts_n
 	return 1
     fi
 
     # Return arg passed without white space.
-    if [[ $flags == [:?] ]] && (( OPTIND[1] > 1 )); then
-	OPTARG=${arg:OPTIND[1]-1}
-	_getopts_name=$n
+    if [[ $_getopts_flags == [:?] ]] && (( OPTIND[1] > 1 )); then
+	OPTARG=${_getopts_arg:OPTIND[1]-1}
+	_getopts_name=$_getopts_n
 	(( ++OPTIND[0] ))
 	OPTIND[1]=1
 	return 1
     fi
 
     # Return no arg passed
-    _getopts_name=$n
+    _getopts_name=$_getopts_n
     return 1
 }
