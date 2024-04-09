@@ -9,7 +9,7 @@ alias getopts='_getopts "$#" "$@"'
 _getopts(){
     local _getopts_help _getopts_usage
     # shellcheck disable=SC2154
-    IFS= read -r -d '' _getopts_help <<EOF
+    IFS= read -r -d '' _getopts_help <<'EOF'
 getopts optstring name [arg ...]
 Parse option arguments.
 
