@@ -204,7 +204,7 @@ _getopts_longopts(){
 	[[ ! $_getopts_v ]] && (( _getopts_argc <= OPTIND[0] )) && {
 	    (( _getopts_special_error )) && _getopts_name=:
 	    (( OPTERR )) && printf '%s: option requires an argument -- %s\n' \
-				   "$0" "$n"
+				   "$0" "$_getopts_n"
 	    return 1
 	}
 	_getopts_v=${_getopts_argv[OPTIND[0]++-1]}
