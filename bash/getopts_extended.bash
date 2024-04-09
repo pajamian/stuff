@@ -4,6 +4,7 @@
 # This file is meant to be sourced.  It will replace the getopts builtin with
 # one that has added functionality.
 #
+shopt -s expand_aliases
 # shellcheck disable=SC2142
 alias getopts='_getopts "$#" "$@"'
 _getopts(){
