@@ -69,11 +69,12 @@ Returns success if an option is found; fails if the end of options is
 encountered or an error occurs.
 EOF
     local -a _getopts_helpa
-    readarray _getopts_helpa <<<"$_getopts_help"
-    _getopts_usage="getopts: usage: ${_getopts_helpa[0]%$'\n'}"
-    _getopts_helpa=("${_getopts_helpa[@]:1}")
-    printf -v _getopts_help '%s' "getopts: ${_getopts_helpa[0]}" \
-	   "${_getopts_helpa[@]/#/    }"
+    readarray -t _getopts_helpa <<<"$_getopts_help"
+    _getopts_usage="getopts: usage: ${_getopts_helpa[0]}"
+    _getopts_help=$(
+	printf 'getopts: %s\n' "${_getopts_helpa[0]}"
+	printf '    %s\n' "${_getopts_helpa[@]:1}"
+		 )
     
     # This can't happen if the funtion is invoked from the alias wrapper.
     (( $#<1 )) && return 1
@@ -95,7 +96,7 @@ EOF
 
     # Display help and exit.
     if [[ $1 == --help ]]; then
-	printf '%s' "$_getopts_help" >&2
+	printf '%s\n' "$_getopts_help" >&2
 	return 0
     fi
     
